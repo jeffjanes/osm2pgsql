@@ -78,15 +78,16 @@ static struct table_desc tables [] = {
          .name = "%p_nodes",
         .start = "BEGIN;\n",
 #ifdef FIXED_POINT
-       .create = "CREATE %m TABLE %p_nodes (id " POSTGRES_OSMID_TYPE " PRIMARY KEY {USING INDEX TABLESPACE %i}, lat int4 not null, lon int4 not null, tags text[]) {TABLESPACE %t};\n",
+       .create = "CREATE %m TABLE %p_nodes (id " POSTGRES_OSMID_TYPE ", lat int4 not null, lon int4 not null, tags text[]) {TABLESPACE %t};\n",
       .prepare = "PREPARE insert_node (" POSTGRES_OSMID_TYPE ", int4, int4, text[]) AS INSERT INTO %p_nodes VALUES ($1,$2,$3,$4);\n"
 #else
-       .create = "CREATE %m TABLE %p_nodes (id " POSTGRES_OSMID_TYPE " PRIMARY KEY {USING INDEX TABLESPACE %i}, lat double precision not null, lon double precision not null, tags text[]) {TABLESPACE %t};\n",
+       .create = "CREATE %m TABLE %p_nodes (id " POSTGRES_OSMID_TYPE ", lat double precision not null, lon double precision not null, tags text[]) {TABLESPACE %t};\n",
       .prepare = "PREPARE insert_node (" POSTGRES_OSMID_TYPE ", double precision, double precision, text[]) AS INSERT INTO %p_nodes VALUES ($1,$2,$3,$4);\n"
 #endif
                "PREPARE get_node (" POSTGRES_OSMID_TYPE ") AS SELECT lat,lon,tags FROM %p_nodes WHERE id = $1 LIMIT 1;\n"
                "PREPARE get_node_list(" POSTGRES_OSMID_TYPE "[]) AS SELECT id, lat, lon FROM %p_nodes WHERE id = ANY($1::" POSTGRES_OSMID_TYPE "[]);\n"
                "PREPARE delete_node (" POSTGRES_OSMID_TYPE ") AS DELETE FROM %p_nodes WHERE id = $1;\n",
+ .create_index = "CREATE unique INDEX %p_nodes_pkey ON %p_nodes (id) {TABLESPACE %i};\n",
          .copy = "COPY %p_nodes FROM STDIN;\n",
       .analyze = "ANALYZE %p_nodes;\n",
          .stop = "COMMIT;\n"
@@ -95,8 +96,9 @@ static struct table_desc tables [] = {
         /*table = t_way,*/
          .name = "%p_ways",
         .start = "BEGIN;\n",
-       .create = "CREATE %m TABLE %p_ways (id " POSTGRES_OSMID_TYPE " PRIMARY KEY {USING INDEX TABLESPACE %i}, nodes " POSTGRES_OSMID_TYPE "[] not null, tags text[], pending boolean not null) {TABLESPACE %t};\n",
- .create_index = "CREATE INDEX %p_ways_idx ON %p_ways (id) {TABLESPACE %i} WHERE pending;\n",
+       .create = "CREATE %m TABLE %p_ways (id " POSTGRES_OSMID_TYPE " , nodes " POSTGRES_OSMID_TYPE "[] not null, tags text[], pending boolean not null) {TABLESPACE %t};\n",
+ .create_index = "CREATE INDEX %p_ways_idx ON %p_ways (id) {TABLESPACE %i} WHERE pending;\n"
+                 "CREATE unique INDEX %p_ways_pkey ON %p_ways (id) {TABLESPACE %i};\n",
 .array_indexes = "CREATE INDEX %p_ways_nodes ON %p_ways USING gin (nodes) {TABLESPACE %i};\n",
       .prepare = "PREPARE insert_way (" POSTGRES_OSMID_TYPE ", " POSTGRES_OSMID_TYPE "[], text[], boolean) AS INSERT INTO %p_ways VALUES ($1,$2,$3,$4);\n"
                "PREPARE get_way (" POSTGRES_OSMID_TYPE ") AS SELECT nodes, tags, array_upper(nodes,1) FROM %p_ways WHERE id = $1;\n"
@@ -114,8 +116,9 @@ static struct table_desc tables [] = {
         /*table = t_rel,*/
          .name = "%p_rels",
         .start = "BEGIN;\n",
-       .create = "CREATE %m TABLE %p_rels(id " POSTGRES_OSMID_TYPE " PRIMARY KEY {USING INDEX TABLESPACE %i}, way_off int2, rel_off int2, parts " POSTGRES_OSMID_TYPE "[], members text[], tags text[], pending boolean not null) {TABLESPACE %t};\n",
- .create_index = "CREATE INDEX %p_rels_idx ON %p_rels (id) {TABLESPACE %i} WHERE pending;\n",
+       .create = "CREATE %m TABLE %p_rels(id " POSTGRES_OSMID_TYPE " , way_off int2, rel_off int2, parts " POSTGRES_OSMID_TYPE "[], members text[], tags text[], pending boolean not null) {TABLESPACE %t};\n",
+ .create_index = "CREATE INDEX %p_rels_idx ON %p_rels (id) {TABLESPACE %i} WHERE pending;\n"
+                 "CREATE unique INDEX %p_rels_pkey ON %p_rels (id) {TABLESPACE %i};\n",
 .array_indexes = "CREATE INDEX %p_rels_parts ON %p_rels USING gin (parts) {TABLESPACE %i};\n",
       .prepare = "PREPARE insert_rel (" POSTGRES_OSMID_TYPE ", int2, int2, " POSTGRES_OSMID_TYPE "[], text[], text[]) AS INSERT INTO %p_rels VALUES ($1,$2,$3,$4,$5,$6,false);\n"
                "PREPARE get_rel (" POSTGRES_OSMID_TYPE ") AS SELECT members, tags, array_upper(members,1)/2 FROM %p_rels WHERE id = $1;\n"
@@ -423,6 +426,10 @@ static int pgsql_endCopy( struct table_desc *table)
         }
         PQclear(res);
         table->copyMode = 0;
+        fprintf(stderr, "Normal COPY_END for %s\n", table->copy);
+        if (table->create_index) {
+              pgsql_exec(sql_conn, PGRES_COMMAND_OK, "%s", table->create_index);
+        }
     }
     return 0;
 }
@@ -1678,7 +1685,12 @@ static int pgsql_start(const struct output_options *options)
 
         if (dropcreate && tables[i].create) {
             pgsql_exec(sql_conn, PGRES_COMMAND_OK, "%s", tables[i].create);
-            if (tables[i].create_index) {
+            /* If we are immediately going into copy mode, then delay the creation of the index
+             * until we leave copy mode.  No selects can be done, not even within the same 
+             * connection, until copy mode is ended.  That works because in this module, 
+             * tables are not put back into copy mode once removed from it.
+             */
+            if (tables[i].create_index && ! tables[i].copy) {
               pgsql_exec(sql_conn, PGRES_COMMAND_OK, "%s", tables[i].create_index);
             }
         }
