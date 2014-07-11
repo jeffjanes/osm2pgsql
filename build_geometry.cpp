@@ -242,12 +242,14 @@ size_t get_wkt_split(osmNode *nodes, int count, int polygon, double split_at) {
 char * get_wkt(size_t index)
 {
 //   return wkts[index].c_str();
-	char *result;
-	result = (char*) std::malloc( wkts[index].length() + 1);
-        // At least give some idea of why we about to seg fault
-        if (!result) std::cerr << std::endl << "Unable to allocate memory: " << (wkts[index].length() + 1) << std::endl;
-	std::strcpy(result, wkts[index].c_str());
-	return result;
+    char *result;
+    result = (char*) std::malloc( wkts[index].length() + 1);
+    // At least give some idea of why we about to seg fault
+    if (!result)
+        std::cerr << std::endl << "Unable to allocate memory: " << (wkts[index].length() + 1) << std::endl;
+    else
+        std::strcpy(result, wkts[index].c_str());
+    return result;
 }
 
 double get_area(size_t index)
@@ -595,3 +597,44 @@ void exclude_broken_polygon ()
 {
     excludepoly = 1;
 }
+
+char *get_multiline_geometry(osmid_t osm_id, struct osmNode **xnodes, int *xcount) {
+    std::auto_ptr<std::vector<Geometry*> > lines(new std::vector<Geometry*>);
+    GeometryFactory gf;
+    geom_ptr geom;
+
+    try
+    {
+        for (int c=0; xnodes[c]; c++) {
+            std::auto_ptr<CoordinateSequence> coords(gf.getCoordinateSequenceFactory()->create((size_t)0, (size_t)2));
+            for (int i = 0; i < xcount[c]; i++) {
+                struct osmNode *nodes = xnodes[c];
+                Coordinate c;
+                c.x = nodes[i].lon;
+                c.y = nodes[i].lat;
+                coords->add(c, 0);
+            }
+            if (coords->getSize() > 1) {
+                geom = geom_ptr(gf.createLineString(coords.release()));
+                lines->push_back(geom.release());
+            }
+        }
+
+        geom_ptr mline (gf.createMultiLineString(lines.release()));
+        WKTWriter writer;
+
+        std::string wkt = writer.write(mline.get());
+        return strdup(wkt.c_str());
+    }
+    catch (std::exception& e)
+      {
+	std::cerr << std::endl << "Standard exception processing relation id "<< osm_id << ": " << e.what()  << std::endl;
+      }
+    catch (...)
+      {
+        std::cerr << std::endl << "Exception caught processing relation id " << osm_id << std::endl;
+      }
+
+    return 0;
+}
+

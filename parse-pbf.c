@@ -29,7 +29,6 @@
 #include <time.h>
 
 #include <zlib.h>
-#include <bzlib.h>
 
 #include "osmtypes.h"
 #include "output.h"
@@ -156,30 +155,8 @@ static size_t uncompress_blob(Blob *bmsg, void *buf, int32_t max_size)
 
     return bmsg->raw_size;
   } else if (bmsg->has_bzip2_data) {
-    int ret;
-    bz_stream strm;
-    strm.bzalloc = NULL;
-    strm.bzfree = NULL;
-    strm.opaque = NULL;
-    strm.avail_in = bmsg->bzip2_data.len;
-    strm.next_in = (char *) bmsg->bzip2_data.data;
-    strm.avail_out = bmsg->raw_size;
-    strm.next_out = buf;
-
-    ret = BZ2_bzDecompressInit(&strm, 0, 0);
-    if (ret != BZ_OK) {
-      fprintf(stderr, "Bzip2 init failed\n");
-      return 0;
-    }
-
-    (void)BZ2_bzDecompressEnd(&strm);
-        
-    if (ret != BZ_STREAM_END) {
-      fprintf(stderr, "Bzip2 compression failed\n");
-      return 0;
-    }
-
-    return bmsg->raw_size;
+    fprintf(stderr, "Can't uncompress bz2 data\n");
+    return 0;
   } else if (bmsg->has_lzma_data) {
     fprintf(stderr, "Can't uncompress LZMA data\n");
     return 0;
@@ -259,7 +236,7 @@ int processOsmHeader(void *data, size_t length)
     return 0;
   }
   
-  header_block__free_unpacked (hmsg, &protobuf_c_system_allocator);
+  header_block__free_unpacked (hmsg, &protobuf_c_default_allocator);
 
   return 1;
 }
@@ -543,7 +520,7 @@ int processOsmData(struct osmdata_t *osmdata, void *data, size_t length)
     if (!processOsmDataRelations(osmdata, group, string_table)) return 0;
   }
 
-  primitive_block__free_unpacked (pmsg, &protobuf_c_system_allocator);
+  primitive_block__free_unpacked (pmsg, &protobuf_c_default_allocator);
 
   return 1;
 }
@@ -608,8 +585,8 @@ int streamFilePbf(char *filename, int sanitize UNUSED, struct osmdata_t *osmdata
       }
     }
 
-    blob__free_unpacked (blob_msg, &protobuf_c_system_allocator);
-    block_header__free_unpacked (header_msg, &protobuf_c_system_allocator);
+    blob__free_unpacked (blob_msg, &protobuf_c_default_allocator);
+    block_header__free_unpacked (header_msg, &protobuf_c_default_allocator);
   } while (!feof(input));
 
   if (!feof(input)) {
