@@ -300,6 +300,7 @@ static int split_tags(struct keyval *tags, unsigned int flags, struct keyval *na
           strcmp(item->key, "old_name") == 0 ||
           (strncmp(item->key, "old_name:", 9) == 0) || 
           strcmp(item->key, "alt_name") == 0 ||
+          (strncmp(item->key, "alt_name_", 9) == 0) || 
           (strncmp(item->key, "alt_name:", 9) == 0) || 
           strcmp(item->key, "official_name") == 0 ||
           (strncmp(item->key, "official_name:", 14) == 0) || 
@@ -660,13 +661,13 @@ static int split_tags(struct keyval *tags, unsigned int flags, struct keyval *na
 
    if (landuse)
    {
-      if (!listHasData(places))
+      if (!listHasData(places) && listHasData(names))
       {
           pushItem(places, landuse);
       }
       else
       {
-          freeItem(item);
+          freeItem(landuse);
       }
    }
 
@@ -1287,6 +1288,16 @@ static int gazetteer_process_relation(osmid_t id, struct member *members, int me
             continue;
          xid2[count] = members[i].id;
          count++;
+      }
+
+      if (count == 0)
+      {
+          if (delete_old) delete_unused_classes('R', id, 0);
+          free(xcount);
+          free(xtags);
+          free(xnodes);
+          free(xid2);
+          return 0;
       }
 
       count = Options->mid->ways_get_list(xid2, count, &xid, xtags, xnodes, xcount);
